@@ -31,7 +31,43 @@ M.defaults = {
   minimal_height_change = 1,
 
   -- List of filetypes to exclude from golden ratio resizing
-  exclude_filetypes = {},
+  exclude_filetypes = {
+    -- File explorers
+    "NvimTree",
+    "neo-tree",
+    "oil",
+    "nerdtree",
+    -- Special windows
+    "qf",
+    "help",
+    "man",
+    "terminal",
+    -- Outlines and sidebars
+    "aerial",
+    "Outline",
+    "vista",
+    "sagaoutline",
+    -- Diagnostics and debugging
+    "Trouble",
+    "dap-repl",
+    "dapui_scopes",
+    "dapui_breakpoints",
+    "dapui_stacks",
+    "dapui_watches",
+    "dapui_console",
+    -- Version control
+    "fugitive",
+    "fugitiveblame",
+    "git",
+    -- Plugins
+    "TelescopePrompt",
+    "TelescopeResults",
+    "packer",
+    "lazy",
+    "undotree",
+    "spectre_panel",
+    "toggleterm",
+  },
 
   -- List of buffer names to exclude (supports exact match)
   exclude_buffer_names = {},

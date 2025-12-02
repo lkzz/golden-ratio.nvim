@@ -30,27 +30,6 @@ local function calculate_scale_factor()
   end
 end
 
--- Calculate target dimensions for the active window
----@return number, number Target height and width
-local function calculate_dimensions()
-  local opts = config.get()
-  local ratio = opts.ratio
-  local lines = vim.o.lines
-  local columns = vim.o.columns
-
-  -- Calculate target height and width based on golden ratio
-  local target_height = math.floor(lines / ratio)
-  local target_width = math.floor((columns / ratio) * calculate_scale_factor())
-
-  -- Apply max width constraint if set
-  if opts.max_width and opts.max_width > 0 then
-    target_width = math.min(opts.max_width, target_width)
-  end
-
-  debug_log(string.format("Target dimensions: %dx%d", target_height, target_width))
-  return target_height, target_width
-end
-
 -- Check if a buffer should be excluded from resizing
 ---@param bufnr number Buffer number
 ---@param winid number Window ID
@@ -99,6 +78,127 @@ local function should_exclude_buffer(bufnr, winid)
   return false
 end
 
+-- Calculate available space excluding excluded windows
+---@param current_winid number Current window ID
+---@param excluded_windows table Pre-collected excluded windows info
+---@return number, number Available lines and columns
+local function calculate_available_space(current_winid, excluded_windows)
+  local total_lines = vim.o.lines
+  local total_columns = vim.o.columns
+
+  -- Get current window position and size
+  local curr_pos = vim.api.nvim_win_get_position(current_winid)
+  local curr_height = vim.api.nvim_win_get_height(current_winid)
+  local curr_width = vim.api.nvim_win_get_width(current_winid)
+  local curr_row_start = curr_pos[1]
+  local curr_row_end = curr_pos[1] + curr_height
+  local curr_col_start = curr_pos[2]
+  local curr_col_end = curr_pos[2] + curr_width
+
+  local excluded_width = 0
+  local excluded_height = 0
+
+  -- Use pre-collected excluded windows info
+  for _, win_info in pairs(excluded_windows) do
+    -- Check if windows overlap in row range (vertical split - side by side)
+    local row_overlap = (win_info.row_start < curr_row_end) and (curr_row_start < win_info.row_end)
+    if row_overlap then
+      excluded_width = excluded_width + win_info.width
+      debug_log(string.format("Excluded window width: %d (row overlap)", win_info.width))
+    end
+
+    -- Check if windows overlap in column range (horizontal split - stacked)
+    local col_overlap = (win_info.col_start < curr_col_end) and (curr_col_start < win_info.col_end)
+    if col_overlap then
+      excluded_height = excluded_height + win_info.height
+      debug_log(string.format("Excluded window height: %d (col overlap)", win_info.height))
+    end
+  end
+
+  local available_columns = total_columns - excluded_width
+  local available_lines = total_lines - excluded_height
+
+  debug_log(string.format("Available space: %dx%d (excluded: %dx%d)", available_lines, available_columns, excluded_height, excluded_width))
+
+  return available_lines, available_columns
+end
+
+-- Calculate target dimensions for the active window
+---@param winid number Window ID
+---@param excluded_windows table Pre-collected excluded windows info
+---@return number, number Target height and width
+local function calculate_dimensions(winid, excluded_windows)
+  local opts = config.get()
+  local ratio = opts.ratio
+
+  -- Calculate available space excluding excluded windows
+  local available_lines, available_columns = calculate_available_space(winid, excluded_windows)
+
+  -- Calculate target height and width based on golden ratio
+  local target_height = math.floor(available_lines / ratio)
+  local target_width = math.floor((available_columns / ratio) * calculate_scale_factor())
+
+  -- Apply max width constraint if set
+  if opts.max_width and opts.max_width > 0 then
+    target_width = math.min(opts.max_width, target_width)
+  end
+
+  debug_log(string.format("Target dimensions: %dx%d", target_height, target_width))
+  return target_height, target_width
+end
+
+-- Detect window layout relative to current window
+---@param winid number Window ID to check
+---@return boolean, boolean has_horizontal_split, has_vertical_split
+local function detect_layout(winid)
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  local normal_windows = vim.tbl_filter(function(win)
+    local cfg = vim.api.nvim_win_get_config(win)
+    return cfg.relative == ""
+  end, wins)
+
+  if #normal_windows <= 1 then
+    return false, false
+  end
+
+  -- Get current window position and size
+  local curr_pos = vim.api.nvim_win_get_position(winid)
+  local curr_height = vim.api.nvim_win_get_height(winid)
+  local curr_width = vim.api.nvim_win_get_width(winid)
+  local curr_row = curr_pos[1]
+  local curr_col = curr_pos[2]
+
+  local has_horizontal = false
+  local has_vertical = false
+
+  -- Check each window to see if it's adjacent to current window
+  for _, win in ipairs(normal_windows) do
+    if win ~= winid then
+      local pos = vim.api.nvim_win_get_position(win)
+      local height = vim.api.nvim_win_get_height(win)
+      local width = vim.api.nvim_win_get_width(win)
+      local row = pos[1]
+      local col = pos[2]
+
+      -- Check if windows are in the same row (side by side = vertical split)
+      -- Windows are in same row if their row positions overlap
+      local row_overlap = (row < curr_row + curr_height) and (curr_row < row + height)
+      if row_overlap and col ~= curr_col then
+        has_vertical = true
+      end
+
+      -- Check if windows are in the same column (stacked = horizontal split)
+      -- Windows are in same column if their column positions overlap
+      local col_overlap = (col < curr_col + curr_width) and (curr_col < col + width)
+      if col_overlap and row ~= curr_row then
+        has_horizontal = true
+      end
+    end
+  end
+
+  return has_horizontal, has_vertical
+end
+
 -- Check if golden ratio should be applied
 ---@param winid number|nil Window ID (defaults to current window)
 ---@return boolean True if should apply
@@ -117,6 +217,12 @@ local function should_apply(winid)
     return false
   end
 
+  -- Check buffer exclusions first (before counting windows)
+  local bufnr = vim.api.nvim_win_get_buf(winid)
+  if should_exclude_buffer(bufnr, winid) then
+    return false
+  end
+
   -- Don't resize if only one window
   local windows = vim.api.nvim_tabpage_list_wins(0)
   local normal_windows = vim.tbl_filter(function(win)
@@ -129,13 +235,40 @@ local function should_apply(winid)
     return false
   end
 
-  -- Check buffer exclusions
-  local bufnr = vim.api.nvim_win_get_buf(winid)
-  if should_exclude_buffer(bufnr, winid) then
-    return false
+  return true
+end
+
+-- Get all excluded windows with their info (optimization: single pass)
+---@param current_winid number Current window ID
+---@return table Map of window ID to window info {width, height, pos, ...}
+local function get_excluded_windows(current_winid)
+  local excluded = {}
+  local all_windows = vim.api.nvim_tabpage_list_wins(0)
+
+  for _, win in ipairs(all_windows) do
+    if win ~= current_winid then
+      local win_config = vim.api.nvim_win_get_config(win)
+      if win_config.relative == "" then  -- Only normal windows
+        local bufnr = vim.api.nvim_win_get_buf(win)
+        if should_exclude_buffer(bufnr, win) then
+          local pos = vim.api.nvim_win_get_position(win)
+          local height = vim.api.nvim_win_get_height(win)
+          local width = vim.api.nvim_win_get_width(win)
+
+          excluded[win] = {
+            width = width,
+            height = height,
+            row_start = pos[1],
+            row_end = pos[1] + height,
+            col_start = pos[2],
+            col_end = pos[2] + width,
+          }
+        end
+      end
+    end
   end
 
-  return true
+  return excluded
 end
 
 -- Resize window to golden ratio dimensions
@@ -147,7 +280,14 @@ local function resize_window(winid)
     return
   end
 
-  local target_height, target_width = calculate_dimensions()
+  -- Get all excluded windows info in a single pass
+  local excluded_windows = get_excluded_windows(winid)
+
+  -- Detect window layout relative to current window
+  local has_horizontal, has_vertical = detect_layout(winid)
+
+  -- Calculate target dimensions using pre-collected excluded windows
+  local target_height, target_width = calculate_dimensions(winid, excluded_windows)
   local current_height = vim.api.nvim_win_get_height(winid)
   local current_width = vim.api.nvim_win_get_width(winid)
   local opts = config.get()
@@ -157,7 +297,9 @@ local function resize_window(winid)
   local width_diff = target_width - current_width
 
   debug_log(string.format(
-    "Current: %dx%d, Target: %dx%d, Diff: %dx%d",
+    "Layout: hsplit=%s vsplit=%s, Current: %dx%d, Target: %dx%d, Diff: %dx%d",
+    has_horizontal,
+    has_vertical,
     current_height,
     current_width,
     target_height,
@@ -169,19 +311,32 @@ local function resize_window(winid)
   -- First, balance all windows
   vim.cmd("wincmd =")
 
-  -- Apply height adjustment if needed
-  if math.abs(height_diff) >= opts.minimal_height_change then
+  -- Apply height adjustment only if there are horizontal splits
+  if has_horizontal and math.abs(height_diff) >= opts.minimal_height_change then
     local success = pcall(vim.api.nvim_win_set_height, winid, target_height)
     if not success then
       debug_log("Failed to set window height")
+    else
+      debug_log("Height adjusted")
     end
   end
 
-  -- Apply width adjustment if needed
-  if math.abs(width_diff) >= opts.minimal_width_change then
+  -- Apply width adjustment only if there are vertical splits
+  if has_vertical and math.abs(width_diff) >= opts.minimal_width_change then
     local success = pcall(vim.api.nvim_win_set_width, winid, target_width)
     if not success then
       debug_log("Failed to set window width")
+    else
+      debug_log("Width adjusted")
+    end
+  end
+
+  -- Restore sizes of excluded windows (use pre-collected info)
+  for win, info in pairs(excluded_windows) do
+    if vim.api.nvim_win_is_valid(win) then
+      pcall(vim.api.nvim_win_set_width, win, info.width)
+      pcall(vim.api.nvim_win_set_height, win, info.height)
+      debug_log(string.format("Restored excluded window %d size: %dx%d", win, info.height, info.width))
     end
   end
 
@@ -294,8 +449,10 @@ function M.enable()
   vim.notify("golden-ratio.nvim: Enabled", vim.log.levels.INFO)
   debug_log("Autocommands registered")
 
-  -- Apply to current window
-  resize_window()
+  -- Apply to current window (scheduled to avoid triggering autocmds in same frame)
+  vim.schedule(function()
+    resize_window()
+  end)
 end
 
 -- Disable golden ratio mode

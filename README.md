@@ -28,9 +28,11 @@ For more info about the golden ratio, check out:
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
+**Option 1: Lazy loading (recommended)**
+
 ```lua
 {
-  "golden-ratio.nvim",
+  "lkzz/golden-ratio.nvim",
   lazy = true,
   keys = {
     { "<leader>wg", "<cmd>GoldenRatioToggle<cr>", desc = "Toggle golden ratio" },
@@ -44,16 +46,13 @@ For more info about the golden ratio, check out:
     "GoldenRatioToggleWidescreen",
     "GoldenRatioAdjust",
   },
-  config = function()
-    require("golden-ratio").setup({
-      -- your configuration comes here
-      -- or leave it empty to use the defaults
-    })
-    -- Automatically enable after setup
-    require("golden-ratio").enable()
-  end,
+  opts = {
+    -- your configuration comes here
+    -- or leave it empty to use the defaults
+  },
 }
 ```
+
 
 ## Usage
 
@@ -94,14 +93,6 @@ The plugin provides the following commands:
 - `:GoldenRatioToggleWidescreen` - Toggle between normal and widescreen modes
 - `:GoldenRatioAdjust <factor>` - Set width adjustment factor
 
-### Keybindings
-
-```lua
-vim.keymap.set("n", "<leader>wg", "<cmd>GoldenRatioToggle<cr>", { desc = "Toggle golden ratio" })
-vim.keymap.set("n", "<leader>wr", "<cmd>GoldenRatioResize<cr>", { desc = "Golden ratio resize" })
-vim.keymap.set("n", "<leader>ww", "<cmd>GoldenRatioToggleWidescreen<cr>", { desc = "Toggle widescreen" })
-```
-
 ## Configuration
 
 ### Default Configuration
@@ -136,7 +127,43 @@ require("golden-ratio").setup({
   minimal_height_change = 1,
 
   -- List of filetypes to exclude from golden ratio resizing
-  exclude_filetypes = {},
+  exclude_filetypes = {
+    -- File explorers
+    "NvimTree",
+    "neo-tree",
+    "oil",
+    "nerdtree",
+    -- Special windows
+    "qf",
+    "help",
+    "man",
+    "terminal",
+    -- Outlines and sidebars
+    "aerial",
+    "Outline",
+    "vista",
+    "sagaoutline",
+    -- Diagnostics and debugging
+    "Trouble",
+    "dap-repl",
+    "dapui_scopes",
+    "dapui_breakpoints",
+    "dapui_stacks",
+    "dapui_watches",
+    "dapui_console",
+    -- Version control
+    "fugitive",
+    "fugitiveblame",
+    "git",
+    -- Plugins
+    "TelescopePrompt",
+    "TelescopeResults",
+    "packer",
+    "lazy",
+    "undotree",
+    "spectre_panel",
+    "toggleterm",
+  },
 
   -- List of buffer names to exclude (supports exact match)
   exclude_buffer_names = {},
@@ -199,8 +226,8 @@ You can exclude certain windows from golden ratio resizing:
 
 ```lua
 require("golden-ratio").setup({
-  -- Exclude by filetype
-  exclude_filetypes = { "NvimTree", "neo-tree", "fugitive" },
+  -- Exclude by filetype (default already excludes common plugins)
+  exclude_filetypes = { "help", "fugitive", "Trouble" },
 
   -- Exclude by exact buffer name
   exclude_buffer_names = { "term://", "[Command Line]" },
